@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import cint, get_fiscal_year, getdate, formatdate
+from frappe.utils import cint, getdate, formatdate
 
 from hrms.payroll.doctype.salary_structure_assignment.salary_structure_assignment import (
 	get_assigned_salary_structure,
@@ -25,14 +25,27 @@ def get_employee_leave_details(employee):
 	leave_salary_amount = 0.0
 	if preview_slip and getattr(preview_slip, "earnings", None):
 		leave_salary_amount = sum(frappe.utils.flt(row.amount) for row in preview_slip.earnings)
+		earnings_breakdown = [
+			{"salary_component": row.salary_component, "amount": frappe.utils.flt(row.amount)}
+			for row in preview_slip.earnings
+		]
+	else:
+		earnings_breakdown = []
+
+	payment_days = 0
+	per_day_salary = 0.0
+	if preview_slip:
+		payment_days = frappe.utils.flt(getattr(preview_slip, "payment_days", 0)) or frappe.utils.flt(
+			getattr(preview_slip, "total_working_days", 0)
+		) or 30
+		per_day_salary = leave_salary_amount / payment_days if payment_days else 0.0
 
 	# Determine leave salary period from the slip dates (fallback to fiscal year)
 	period_text = ""
 	if preview_slip and getattr(preview_slip, "start_date", None) and getattr(preview_slip, "end_date", None):
 		period_text = f"{formatdate(preview_slip.start_date, 'YYYY')}-{formatdate(preview_slip.end_date, 'YYYY')}"
 	elif last_leave and last_leave.get("from_date"):
-		fy = get_fiscal_year(last_leave.get("from_date"))[0]
-		period_text = f"{fy}-{fy}"
+		period_text = str(getdate(last_leave.get("from_date")).year)
 
 	data = {
 		"leaves": leave_rows,
@@ -43,6 +56,9 @@ def get_employee_leave_details(employee):
 		"leave_salary_period": period_text,
 		"ticket_sponsored": _bool_label(last_leave.get("ticket_sponsored")),
 		"salary_structure": assigned_structure,
+		"earnings_breakdown": earnings_breakdown,
+		"payment_days": payment_days,
+		"per_day_salary": per_day_salary,
 	}
 
 	return data
