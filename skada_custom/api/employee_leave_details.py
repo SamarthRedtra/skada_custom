@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import cint, getdate, formatdate
+from frappe.utils import cint, flt, getdate, formatdate, date_diff
 
 from hrms.payroll.doctype.salary_structure_assignment.salary_structure_assignment import (
 	get_assigned_salary_structure,
@@ -12,70 +12,65 @@ def get_employee_leave_details(employee):
 	if not employee:
 		return {}
 
-	leave_rows = _get_leave_applications(employee)
-	last_leave = leave_rows[0] if leave_rows else {}
-
-	# Choose the last annual leave if available, else fallback to last leave
-	last_annual_leave = next((row for row in leave_rows if row.get("leave_type") and "annual" in row.get("leave_type", "").lower()), last_leave)
-
 	assigned_structure = get_assigned_salary_structure(employee, frappe.utils.nowdate())
 	preview_slip = _make_preview_salary_slip(assigned_structure, employee) if assigned_structure else None
 
-	# Use gross earnings from preview slip as leave salary baseline
 	leave_salary_amount = 0.0
+	earnings_breakdown = []
 	if preview_slip and getattr(preview_slip, "earnings", None):
-		leave_salary_amount = sum(frappe.utils.flt(row.amount) for row in preview_slip.earnings)
+		leave_salary_amount = sum(flt(row.amount) for row in preview_slip.earnings)
 		earnings_breakdown = [
-			{"salary_component": row.salary_component, "amount": frappe.utils.flt(row.amount)}
+			{"salary_component": row.salary_component, "amount": flt(row.amount)}
 			for row in preview_slip.earnings
 		]
-	else:
-		earnings_breakdown = []
 
 	payment_days = 0
 	per_day_salary = 0.0
 	if preview_slip:
-		payment_days = frappe.utils.flt(getattr(preview_slip, "payment_days", 0)) or frappe.utils.flt(
+		payment_days = flt(getattr(preview_slip, "payment_days", 0)) or flt(
 			getattr(preview_slip, "total_working_days", 0)
 		) or 30
 		per_day_salary = leave_salary_amount / payment_days if payment_days else 0.0
 
-	# Determine leave salary period from the slip dates (fallback to fiscal year)
+	# Use custom child table entries to compute leave salary slices
+	table_rows = _get_leave_detail_rows(employee)
+	for row in table_rows:
+		row["days"] = max(0, (date_diff(row["to_date"], row["from_date"]) + 1))
+		row["amount"] = flt(per_day_salary * row["days"])
+
+	total_amount = sum(row.get("amount", 0) for row in table_rows)
+
 	period_text = ""
 	if preview_slip and getattr(preview_slip, "start_date", None) and getattr(preview_slip, "end_date", None):
 		period_text = f"{formatdate(preview_slip.start_date, 'YYYY')}-{formatdate(preview_slip.end_date, 'YYYY')}"
-	elif last_leave and last_leave.get("from_date"):
-		period_text = str(getdate(last_leave.get("from_date")).year)
 
 	data = {
-		"leaves": leave_rows,
-		"last_leave": last_leave,
-		"last_annual_leave": last_annual_leave,
-		"last_leave_salary_date": last_leave.get("to_date"),
-		"last_leave_salary_amount": leave_salary_amount,
-		"leave_salary_period": period_text,
-		"ticket_sponsored": _bool_label(last_leave.get("ticket_sponsored")),
 		"salary_structure": assigned_structure,
 		"earnings_breakdown": earnings_breakdown,
 		"payment_days": payment_days,
 		"per_day_salary": per_day_salary,
+		"table_rows": table_rows,
+		"total_leave_amount": total_amount,
+		"leave_salary_period": period_text,
 	}
 
 	return data
 
 
-def _get_leave_applications(employee, limit=5):
-	"""Return recent submitted leave applications (most recent first)."""
-	leave_apps = frappe.get_all(
-		"Leave Application",
-		filters={"employee": employee, "docstatus": ("<", 2)},
-		fields=["name", "leave_type", "from_date", "to_date", "ticket_sponsored"],
-		order_by="from_date desc",
-		limit=limit,
-	)
-	for idx, row in enumerate(leave_apps, 1):
-		row["idx"] = idx
-	return leave_apps
+def _get_leave_detail_rows(employee):
+	doc = frappe.get_doc("Employee", employee)
+	rows = []
+	for child in doc.get("custom_leave_details_table") or []:
+		if child.from_date and child.to_date:
+			rows.append(
+				{
+					"from_date": child.from_date,
+					"to_date": child.to_date,
+					"travel_sponsored": cint(child.travel_sponsored),
+					"remarks": child.remarks,
+				}
+			)
+	return rows
 
 
 def _make_preview_salary_slip(salary_structure, employee):
@@ -88,7 +83,3 @@ def _make_preview_salary_slip(salary_structure, employee):
 		posting_date=frappe.utils.nowdate(),
 		for_preview=1,
 	)
-
-
-def _bool_label(value):
-	return _("Yes") if cint(value) else _("No")

@@ -32,30 +32,27 @@ function render_leave_details(frm) {
 
 function hasAnyData(data) {
 	return Boolean(
-		(data.leaves && data.leaves.length) ||
-		data.last_leave_salary_amount ||
+		(data.table_rows && data.table_rows.length) ||
+		data.per_day_salary ||
 		data.salary_structure ||
-		data.leave_salary_period ||
-		data.last_leave_salary_date
+		data.leave_salary_period
 	);
 }
 
 function build_header(data, doc) {
-	const lastAnnualFrom = data.last_annual_leave?.from_date ? frappe.format(data.last_annual_leave.from_date, {fieldtype: 'Date'}) : __('N/A');
-	const lastAnnualTo = data.last_annual_leave?.to_date ? frappe.format(data.last_annual_leave.to_date, {fieldtype: 'Date'}) : '';
-	const lastLeaveSalaryDate = data.last_leave_salary_date ? frappe.format(data.last_leave_salary_date, {fieldtype: 'Date'}) : __('N/A');
+	const perDay = data.per_day_salary || 0;
+	const period = data.leave_salary_period || __('N/A');
 
 	return $(`
 		<div class="mb-4 p-3" style="background:linear-gradient(90deg,#f5f8ff,#f0f6ff); border:1px solid #e1e8ff; border-radius:6px;">
 			<div class="row">
 				<div class="col-sm-4 mb-2"><strong>${__('Salary Structure')}</strong>: ${data.salary_structure || __('Not Assigned')}</div>
-				<div class="col-sm-4 mb-2"><strong>${__('Last Leave Salary Date')}</strong>: ${lastLeaveSalaryDate}</div>
-				<div class="col-sm-4 mb-2"><strong>${__('Leave Salary Amount')}</strong>: ${format_currency(data.last_leave_salary_amount || 0, doc.salary_currency || frappe.defaults.get_default('currency'))}</div>
+				<div class="col-sm-4 mb-2"><strong>${__('Per Day Salary')}</strong>: ${format_currency(perDay, doc.salary_currency || frappe.defaults.get_default('currency'))}</div>
+				<div class="col-sm-4 mb-2"><strong>${__('Payment Days')}</strong>: ${data.payment_days || 0}</div>
 			</div>
 			<div class="row">
-				<div class="col-sm-4 mb-2"><strong>${__('Last Annual Leave')}</strong>: ${lastAnnualFrom}${lastAnnualTo ? ' || ' + lastAnnualTo : ''}</div>
-				<div class="col-sm-4 mb-2"><strong>${__('Leave Salary Period')}</strong>: ${data.leave_salary_period || __('N/A')}</div>
-				<div class="col-sm-4 mb-2"><strong>${__('Ticket Sponsored')}</strong>: ${data.ticket_sponsored || __('No')}</div>
+				<div class="col-sm-4 mb-2"><strong>${__('Leave Salary Period')}</strong>: ${period}</div>
+				<div class="col-sm-4 mb-2"><strong>${__('Total Computed Amount')}</strong>: ${format_currency(data.total_leave_amount || 0, doc.salary_currency || frappe.defaults.get_default('currency'))}</div>
 			</div>
 		</div>
 	`);
@@ -63,54 +60,9 @@ function build_header(data, doc) {
 
 function build_sections(data) {
 	const wrapper = $('<div class="extra-info"></div>');
-	wrapper.append(build_leave_table(data.leaves || []));
-	wrapper.append(build_collapsible(__('Leave Salary'), build_leave_salary_body(data)));
-	wrapper.append(build_collapsible(__('Salary Increment'), build_salary_increment_body(data)));
-	wrapper.append(build_collapsible(__('Documents'), build_documents_body(data)));
+	wrapper.append(build_collapsible(__('Leave Salary Details'), build_leave_detail_table(data)));
+	wrapper.append(build_collapsible(__('Earnings Breakdown'), build_leave_salary_body(data)));
 	return wrapper;
-}
-
-function build_leave_table(rows) {
-	const table = $(`
-		<div class="card mb-3 shadow-sm" style="border:1px solid #a9c8f8;">
-			<div class="card-header" style="background:linear-gradient(90deg,#dbe9ff,#c5dbff);">
-				<span class="fw-bold">${__('Annual Leave')}</span>
-			</div>
-			<div class="table-responsive mb-0">
-				<table class="table table-sm mb-0">
-					<thead>
-						<tr>
-							<th style="width:40px;">#</th>
-							<th>${__('From')}</th>
-							<th>${__('To')}</th>
-							<th>${__('Ticket Sponsored')}</th>
-						</tr>
-					</thead>
-					<tbody></tbody>
-				</table>
-			</div>
-		</div>
-	`);
-
-	const tbody = table.find('tbody');
-	if (!rows.length) {
-		tbody.append(`<tr><td colspan="4" class="text-muted">${__('No leave applications found')}</td></tr>`);
-	} else {
-		rows.forEach((row, idx) => {
-			const from = row.from_date ? frappe.format(row.from_date, {fieldtype: 'Date'}) : '';
-			const to = row.to_date ? frappe.format(row.to_date, {fieldtype: 'Date'}) : '';
-			const ticket = row.ticket_sponsored ? __('Yes') : __('No');
-			tbody.append(`
-				<tr>
-					<td>${idx + 1}</td>
-					<td>${from}</td>
-					<td>${to}</td>
-					<td>${ticket}</td>
-				</tr>
-			`);
-		});
-	}
-	return table;
 }
 
 function build_collapsible(title, bodyHtml) {
@@ -131,6 +83,55 @@ function build_collapsible(title, bodyHtml) {
 	});
 
 	return card;
+}
+
+function build_leave_detail_table(data) {
+	const rows = data.table_rows || [];
+	const table = $(`
+		<div class="table-responsive mb-0">
+			<table class="table table-sm mb-0">
+				<thead>
+					<tr>
+						<th style="width:40px;">#</th>
+						<th>${__('From')}</th>
+						<th>${__('To')}</th>
+						<th class="text-end">${__('Days')}</th>
+						<th class="text-end">${__('Amount')}</th>
+						<th>${__('Travel Sponsored')}</th>
+						<th>${__('Remarks')}</th>
+					</tr>
+				</thead>
+				<tbody></tbody>
+			</table>
+		</div>
+	`);
+
+	const tbody = table.find('tbody');
+	if (!rows.length) {
+		tbody.append(`<tr><td colspan="7" class="text-muted">${__('No leave detail rows found. Add entries in the Leave Details table to compute amounts.')}</td></tr>`);
+	} else {
+		rows.forEach((row, idx) => {
+			const from = row.from_date ? frappe.format(row.from_date, {fieldtype: 'Date'}) : '';
+			const to = row.to_date ? frappe.format(row.to_date, {fieldtype: 'Date'}) : '';
+			const days = row.days || 0;
+			const amt = format_currency(row.amount || 0, frappe.defaults.get_default('currency'));
+			const travel = row.travel_sponsored ? __('Yes') : __('No');
+			const remarks = row.remarks ? frappe.utils.escape_html(row.remarks) : '';
+			tbody.append(`
+				<tr>
+					<td>${idx + 1}</td>
+					<td>${from}</td>
+					<td>${to}</td>
+					<td class="text-end">${days}</td>
+					<td class="text-end">${amt}</td>
+					<td>${travel}</td>
+					<td>${remarks}</td>
+				</tr>
+			`);
+		});
+	}
+
+	return table;
 }
 
 function build_leave_salary_body(data) {
@@ -156,7 +157,7 @@ function build_leave_salary_body(data) {
 		<div class="row">
 			<div class="col-sm-6 mb-2">
 				<div class="text-muted small">${__('Amount')}</div>
-				<div class="fw-bold">${format_currency(data.last_leave_salary_amount || 0, frappe.defaults.get_default('currency'))}</div>
+				<div class="fw-bold">${format_currency(data.total_leave_amount || 0, frappe.defaults.get_default('currency'))}</div>
 			</div>
 			<div class="col-sm-6 mb-2">
 				<div class="text-muted small">${__('Derived From')}</div>
@@ -175,7 +176,7 @@ function build_leave_salary_body(data) {
 			</div>
 			<div class="col-sm-4 mb-2">
 				<div class="text-muted small">${__('Calculation')}</div>
-				<div class="text-muted small">${__('Total Earnings ÷ Payment Days')}</div>
+				<div class="text-muted small">${__('(Total Earnings ÷ Payment Days) × Days in each row')}</div>
 			</div>
 		</div>
 		${breakdownTable}
