@@ -3,7 +3,7 @@ frappe.ui.form.on('Employee', {
 		if (!frm.fields_dict?.custom_leave_details || frm.is_new()) {
 			return;
 		}
-		render_leave_details(frm);
+		// render_leave_details(frm);
 	},
 });
 
@@ -111,8 +111,8 @@ function build_leave_detail_table(data) {
 		tbody.append(`<tr><td colspan="7" class="text-muted">${__('No leave detail rows found. Add entries in the Leave Details table to compute amounts.')}</td></tr>`);
 	} else {
 		rows.forEach((row, idx) => {
-			const from = row.from_date ? frappe.format(row.from_date, {fieldtype: 'Date'}) : '';
-			const to = row.to_date ? frappe.format(row.to_date, {fieldtype: 'Date'}) : '';
+			const from = row.from_date ? frappe.format(row.from_date, { fieldtype: 'Date' }) : '';
+			const to = row.to_date ? frappe.format(row.to_date, { fieldtype: 'Date' }) : '';
 			const days = row.days || 0;
 			const amt = format_currency(row.amount || 0, frappe.defaults.get_default('currency'));
 			const travel = row.travel_sponsored ? __('Yes') : __('No');

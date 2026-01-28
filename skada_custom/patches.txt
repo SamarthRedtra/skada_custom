@@ -4,3 +4,4 @@
 
 [post_model_sync]
 skada_custom.patches.trans #hh
+skada_custom.patches.property_setters
